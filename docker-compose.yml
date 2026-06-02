@@ -1,0 +1,14 @@
+# Poller isolado (dev) — API noutro terminal ou outro compose.
+# Uso: docker compose up --build
+# Requer DATABASE_URL e ENCRYPTION_KEY (ficheiro .env na pasta poller).
+
+services:
+  billing-poller:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["node", "src/index.js"]
+    env_file: .env
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
