@@ -2,6 +2,21 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { pickBestCursorEvent } from "./billing-cursor-match.js";
 import { cursorEventKey } from "./cursor-admin-api.js";
+import { billingCallAnchorMs } from "../services/billing-settle-service.js";
+
+test("billingCallAnchorMs: usa apenas started_at", () => {
+  const started = "2026-01-01T10:00:00.000Z";
+  const ended = "2026-01-01T10:05:00.000Z";
+  assert.equal(
+    billingCallAnchorMs(started),
+    new Date(started).getTime()
+  );
+  assert.equal(
+    billingCallAnchorMs(started, ended),
+    new Date(started).getTime()
+  );
+  assert.equal(Number.isNaN(billingCallAnchorMs(null)), true);
+});
 
 test("pickBestCursorEvent: entre elegíveis escolhe timestamp mais antigo", () => {
   const events = [
@@ -9,8 +24,7 @@ test("pickBestCursorEvent: entre elegíveis escolhe timestamp mais antigo", () =
     { timestamp: "4800", chargedCents: 10, isChargeable: true },
   ];
   const m = pickBestCursorEvent({
-    startedMs: 1000,
-    endedMs: 5000,
+    startedMs: 5000,
     events,
     maxMatchDeltaMs: 10_000,
   });
@@ -19,24 +33,22 @@ test("pickBestCursorEvent: entre elegíveis escolhe timestamp mais antigo", () =
   assert.equal(m.chargedCents, 10);
 });
 
-test("pickBestCursorEvent: aceita evento pouco depois de ended_at", () => {
-  const events = [{ timestamp: "6000", chargedCents: 99, isChargeable: true }];
+test("pickBestCursorEvent: ancora em started_at (evento perto do início)", () => {
+  const events = [{ timestamp: "5200", chargedCents: 99, isChargeable: true }];
   const m = pickBestCursorEvent({
-    startedMs: 1000,
-    endedMs: 5000,
+    startedMs: 5000,
     events,
     maxMatchDeltaMs: 5000,
   });
   assert.ok(m);
-  assert.equal(m.eventTimestampMs, 6000);
-  assert.equal(m.matchDeltaMs, 1000);
+  assert.equal(m.eventTimestampMs, 5200);
+  assert.equal(m.matchDeltaMs, 200);
 });
 
-test("pickBestCursorEvent: rejeita evento fora da tolerância", () => {
+test("pickBestCursorEvent: rejeita evento fora da tolerância de started_at", () => {
   const events = [{ timestamp: "6000", chargedCents: 99, isChargeable: true }];
   const m = pickBestCursorEvent({
     startedMs: 1000,
-    endedMs: 5000,
     events,
     maxMatchDeltaMs: 500,
   });
@@ -47,8 +59,7 @@ test("pickBestCursorEvent: consumedKeys remove evento do pool", () => {
   const evOld = { id: "e1", timestamp: "4800", chargedCents: 10, isChargeable: true };
   const evNew = { id: "e2", timestamp: "4900", chargedCents: 20, isChargeable: true };
   const m = pickBestCursorEvent({
-    startedMs: 1000,
-    endedMs: 5000,
+    startedMs: 5000,
     events: [evOld, evNew],
     consumedKeys: new Set([cursorEventKey(evOld)]),
     maxMatchDeltaMs: 10_000,
@@ -72,8 +83,7 @@ test("pickBestCursorEvent: filtra por email", () => {
     },
   ];
   const m = pickBestCursorEvent({
-    startedMs: 1000,
-    endedMs: 5000,
+    startedMs: 5000,
     events,
     email: "bot@x.com",
     maxMatchDeltaMs: 10_000,

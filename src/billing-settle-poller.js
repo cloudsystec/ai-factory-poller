@@ -2,6 +2,7 @@ import { createLogger } from "./lib/logger.js";
 import { fetchAllFilteredUsageEvents } from "./lib/cursor-admin-api.js";
 import { pickBestCursorEvent } from "./lib/billing-cursor-match.js";
 import {
+  cursorUsageDurationEstimateMs,
   cursorUsageEndBufferMs,
   cursorUsageStartBufferMs,
 } from "./lib/billing-match-config.js";
@@ -20,8 +21,8 @@ import { query } from "./db/pool.js";
 const log = createLogger("billing-poller");
 
 /**
- * Settle incremental: calls por ended_at ASC; eventos Cursor já claimados saem do pool;
- * desempate pelo timestamp mais antigo na folga (BILLING_MAX_MATCH_DELTA_MS).
+ * Settle incremental: calls por started_at ASC; match ancora em started_at;
+ * eventos Cursor já claimados saem do pool; desempate pelo timestamp mais antigo.
  */
 
 /** @type {ReturnType<typeof setInterval>|null} */
@@ -67,7 +68,7 @@ async function maybeRefreshJobBilling(tenantId, jobId) {
 
 /**
  * @param {Map<string, { events: object[], apiKey: string }>} fetchCache
- * @param {{ tenant_id: string, bot_email: string, started_at: Date, ended_at: Date }} group
+ * @param {{ tenant_id: string, bot_email: string, started_at: Date, latest_start_at: Date }} group
  */
 async function loadEventsForGroup(fetchCache, group) {
   const cacheKey = `${group.tenant_id}|${group.bot_email}`;
@@ -80,7 +81,10 @@ async function loadEventsForGroup(fetchCache, group) {
   }
 
   const startMs = group.started_at.getTime() - cursorUsageStartBufferMs();
-  const endMs = group.ended_at.getTime() + cursorUsageEndBufferMs();
+  const endMs =
+    group.latest_start_at.getTime() +
+    cursorUsageDurationEstimateMs() +
+    cursorUsageEndBufferMs();
   try {
     const { events } = await fetchAllFilteredUsageEvents(apiKey, {
       startDate: startMs,
@@ -104,13 +108,16 @@ async function loadEventsForGroup(fetchCache, group) {
 
 /**
  * @param {Map<string, Promise<Set<string>>>} consumedCache
- * @param {{ tenant_id: string, bot_email: string, started_at: Date, ended_at: Date }} group
+ * @param {{ tenant_id: string, bot_email: string, started_at: Date, latest_start_at: Date }} group
  */
 async function loadTickConsumedForGroup(consumedCache, group) {
   const cacheKey = `${group.tenant_id}|${group.bot_email}`;
   if (!consumedCache.has(cacheKey)) {
     const sinceMs = group.started_at.getTime() - cursorUsageStartBufferMs();
-    const untilMs = group.ended_at.getTime() + cursorUsageEndBufferMs();
+    const untilMs =
+      group.latest_start_at.getTime() +
+      cursorUsageDurationEstimateMs() +
+      cursorUsageEndBufferMs();
     const promise = loadConsumedKeys(group.tenant_id, group.bot_email, {
       sinceMs,
       untilMs,
@@ -144,22 +151,25 @@ export async function runBillingSettleTick() {
         continue;
       }
       const key = `${call.tenant_id}|${botEmail}`;
-      const startedMs = new Date(call.started_at).getTime();
-      const anchorMs = billingCallAnchorMs(call.started_at, call.ended_at);
+      const startedMs = billingCallAnchorMs(call.started_at);
+      if (!Number.isFinite(startedMs)) {
+        skipped += 1;
+        continue;
+      }
       const existing = groups.get(key);
       if (!existing) {
         groups.set(key, {
           tenant_id: call.tenant_id,
           bot_email: botEmail,
           started_at: new Date(startedMs),
-          ended_at: new Date(anchorMs),
+          latest_start_at: new Date(startedMs),
         });
       } else {
         if (startedMs < existing.started_at.getTime()) {
           existing.started_at = new Date(startedMs);
         }
-        if (anchorMs > existing.ended_at.getTime()) {
-          existing.ended_at = new Date(anchorMs);
+        if (startedMs > existing.latest_start_at.getTime()) {
+          existing.latest_start_at = new Date(startedMs);
         }
       }
     }
@@ -175,13 +185,11 @@ export async function runBillingSettleTick() {
       const { events } = await loadEventsForGroup(fetchCache, group);
       const tickConsumed = await loadTickConsumedForGroup(consumedCache, group);
 
-      const startedMs = new Date(call.started_at).getTime();
-      const anchorMs = billingCallAnchorMs(call.started_at, call.ended_at);
-      if (!Number.isFinite(anchorMs)) continue;
+      const startedMs = billingCallAnchorMs(call.started_at);
+      if (!Number.isFinite(startedMs)) continue;
 
       const match = pickBestCursorEvent({
         startedMs,
-        endedMs: anchorMs,
         events,
         consumedKeys: tickConsumed,
         email: botEmail,

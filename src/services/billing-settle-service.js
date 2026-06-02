@@ -8,6 +8,7 @@ import { aggregateJobChargeSource } from "../lib/charge-source.js";
 import { chargedCentsToCostBaseUsd } from "../lib/billing-cursor-match.js";
 
 const SETTLE_GRACE_SECONDS = 5;
+const SETTLE_MIN_CALL_AGE_SECONDS = 30;
 const POLL_BATCH_LIMIT = 50;
 
 /**
@@ -47,15 +48,12 @@ async function insertClaimsWithClient(client, input) {
 }
 
 /**
+ * Âncora temporal para match Cursor — apenas started_at (ended_at ignorado).
  * @param {Date|string|number|null|undefined} startedAt
- * @param {Date|string|number|null|undefined} endedAt
  */
-export function billingCallAnchorMs(startedAt, endedAt) {
-  const ended = endedAt != null ? new Date(endedAt).getTime() : NaN;
+export function billingCallAnchorMs(startedAt) {
   const started = startedAt != null ? new Date(startedAt).getTime() : NaN;
-  if (Number.isFinite(ended)) return ended;
-  if (Number.isFinite(started)) return started;
-  return NaN;
+  return Number.isFinite(started) ? started : NaN;
 }
 
 /**
@@ -80,11 +78,11 @@ export async function listCallsAwaitingCursorSettle(limit = POLL_BATCH_LIMIT) {
        ON tw.tenant_id = c.tenant_id AND tw.worker_slot = wl.worker_slot
      WHERE c.status IN ('pending', 'estimated')
        AND c.source IS DISTINCT FROM 'cursor_admin_api'
-       AND COALESCE(c.ended_at, c.started_at)
+       AND c.started_at
          + make_interval(secs => $2::double precision) < now()
-     ORDER BY COALESCE(c.ended_at, c.started_at) ASC
+     ORDER BY c.started_at ASC
      LIMIT $1`,
-    [lim, SETTLE_GRACE_SECONDS]
+    [lim, SETTLE_GRACE_SECONDS + SETTLE_MIN_CALL_AGE_SECONDS]
   );
   return rows;
 }

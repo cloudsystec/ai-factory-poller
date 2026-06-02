@@ -7,11 +7,10 @@ import { cursorChargedFieldToCostBaseUsd } from "./cursor-charge-cents.js";
 import { billingMatchDeltaMs } from "./billing-match-config.js";
 
 /**
- * Primeiro evento Cursor elegível: não consumido, dentro da folga de ended_at,
+ * Primeiro evento Cursor elegível: não consumido, dentro da folga de started_at,
  * desempate pelo timestamp mais antigo (resolve ambiguidade nas rodadas seguintes).
  * @param {{
  *   startedMs: number,
- *   endedMs: number,
  *   events: object[],
  *   consumedKeys?: Set<string>,
  *   email?: string,
@@ -25,13 +24,7 @@ import { billingMatchDeltaMs } from "./billing-match-config.js";
  * } | null}
  */
 export function pickBestCursorEvent(opts) {
-  const endedMs = Number(opts.endedMs);
-  const startedMs = Number(opts.startedMs);
-  const anchorMs = Number.isFinite(endedMs)
-    ? endedMs
-    : Number.isFinite(startedMs)
-      ? startedMs
-      : NaN;
+  const anchorMs = Number(opts.startedMs);
   if (!Number.isFinite(anchorMs)) return null;
 
   const maxDelta = opts.maxMatchDeltaMs ?? billingMatchDeltaMs();

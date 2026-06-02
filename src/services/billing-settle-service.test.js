@@ -11,15 +11,10 @@ test("billing-settle-service exports", () => {
   assert.equal(typeof mod.areAllJobCallsSettled, "function");
 });
 
-test("billingCallAnchorMs prefere ended_at", () => {
+test("billingCallAnchorMs usa apenas started_at", () => {
   const ended = new Date("2026-05-30T12:00:00Z");
   const started = new Date("2026-05-30T11:00:00Z");
-  assert.equal(
-    mod.billingCallAnchorMs(started, ended),
-    ended.getTime()
-  );
-  assert.equal(
-    mod.billingCallAnchorMs(started, null),
-    started.getTime()
-  );
+  assert.equal(mod.billingCallAnchorMs(started, ended), started.getTime());
+  assert.equal(mod.billingCallAnchorMs(started), started.getTime());
+  assert.equal(Number.isNaN(mod.billingCallAnchorMs(null)), true);
 });
